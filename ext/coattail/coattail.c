@@ -4,9 +4,12 @@
 #include <errno.h>
 #include <unistd.h>
 #include <sys/stat.h>
+#include <sys/types.h>
+#include <sys/uio.h>
 
-//sleep interval in microseconds
-#define SLEEP_INTERVAL 250000
+#define SLEEP_INTERVAL 250000 /*sleep interval in microseconds*/
+#define BUF_SIZE (8*1024) /*read buffer size*/
+#define MAX_LINE_LENGTH (64*1024) /*max line length*/
 
 static int open_file(VALUE obj) {
     //get filename from object
@@ -21,7 +24,37 @@ static int open_file(VALUE obj) {
 }
 
 static void read_lines(int fd, off_t* pos) {
+    //init vars
+    char buf[BUF_SIZE];
+    char line[MAX_LINE_LENGTH+1];
+    char* l = line;
+    int line_len = 0;
 
+    while (1) {
+        //read from file
+        ssize_t num_read = read(fd, buf, BUF_SIZE);
+        if (num_read == -1) rb_raise(rb_eRuntimeError, "Error reading from file (%s).", strerror(errno));
+        if (num_read == 0) return; //end of file case
+
+        //process read data
+        char* b = buf;
+        for (int i=0; i<num_read; i++, b++) {
+            if ((*b == '\n') || (line_len >= MAX_LINE_LENGTH)) {
+                if (line_len != 0) {
+                    *l = 0;
+                    rb_yield(rb_str_new2(line));
+                    l = line;
+                    line_len = 0;
+                }
+            }
+            else {
+                //copy data to line buffer and increase pointers
+                *l = *b;
+                l++;
+                line_len++;
+            }
+        }
+    }
 }
 
 static VALUE each_line(VALUE self) {
