@@ -57,6 +57,7 @@ static void read_lines(VALUE obj, int fd, off_t* pos) {
         ssize_t num_read = read(fd, buf, BUF_SIZE);
         if (num_read == -1) rb_raise(rb_eRuntimeError, "Error reading from file (%s).", strerror(errno));
         if (num_read == 0) return; //end of file case
+        *pos += num_read;
 
         //process read data
         char* b = buf;
