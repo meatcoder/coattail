@@ -11,6 +11,14 @@
 #define BUF_SIZE (8*1024) /*read buffer size*/
 #define MAX_LINE_LENGTH (64*1024) /*max line length*/
 
+typedef struct {
+    char data[MAX_LINE_LENGTH+1];
+    char* cur;
+    int len;
+} Line;
+
+static VALUE cLine = Qnil;
+
 static int open_file(VALUE obj) {
     //get filename from object
     VALUE fname_val = rb_iv_get(obj, "@fname");
@@ -23,13 +31,27 @@ static int open_file(VALUE obj) {
     return fd;
 }
 
-static void read_lines(int fd, off_t* pos) {
-    //init vars
-    char buf[BUF_SIZE];
-    char line[MAX_LINE_LENGTH+1];
-    char* l = line;
-    int line_len = 0;
+static void Line_free(void* l) {
+    xfree(l);
+}
 
+static void read_lines(VALUE obj, int fd, off_t* pos) {
+    //get line struct
+    VALUE line_obj = rb_iv_get(obj, "@line");
+    Line* line = NULL;
+    if (line_obj == Qnil) {
+        line = ALLOC(Line);
+        line->cur = line->data;
+        line->len = 0;
+
+        rb_iv_set(obj,"@line", Data_Wrap_Struct(cLine, NULL, Line_free,line));
+    }
+    else {
+        Data_Get_Struct(line_obj, Line, line);
+    }
+
+    //read loop
+    char buf[BUF_SIZE];
     while (1) {
         //read from file
         ssize_t num_read = read(fd, buf, BUF_SIZE);
@@ -39,19 +61,19 @@ static void read_lines(int fd, off_t* pos) {
         //process read data
         char* b = buf;
         for (int i=0; i<num_read; i++, b++) {
-            if ((*b == '\n') || (line_len >= MAX_LINE_LENGTH)) {
-                if (line_len != 0) {
-                    *l = 0;
-                    rb_yield(rb_str_new2(line));
-                    l = line;
-                    line_len = 0;
+            if ((*b == '\n') || (line->len >= MAX_LINE_LENGTH)) {
+                if (line->len != 0) {
+                    *(line->cur) = 0;
+                    rb_yield(rb_str_new2(line->data));
+                    line->cur = line->data;
+                    line->len = 0;
                 }
             }
             else {
                 //copy data to line buffer and increase pointers
-                *l = *b;
-                l++;
-                line_len++;
+                *(line->cur) = *b;
+                (line->cur)++;
+                (line->len)++;
             }
         }
     }
@@ -76,7 +98,7 @@ static VALUE each_line(VALUE self) {
         if (res == -1) rb_raise(rb_eRuntimeError, "Unable get size of file (%s).", strerror(errno));
 
         //check if the size of the file changed from earlier
-        if (info.st_size > cur_pos) read_lines(fd, &cur_pos);
+        if (info.st_size > cur_pos) read_lines(self, fd, &cur_pos);
         else usleep(SLEEP_INTERVAL);
     }
 
@@ -86,4 +108,6 @@ static VALUE each_line(VALUE self) {
 void Init_coattail(void) {
     VALUE cCoatTail = rb_const_get(rb_cObject, rb_intern("CoatTail"));
     rb_define_method(cCoatTail, "each_line", each_line, 0);
+
+    cLine = rb_const_get(rb_cObject, rb_intern("CoatTailLine"));
 }
